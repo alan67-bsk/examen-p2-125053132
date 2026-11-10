@@ -1,48 +1,39 @@
-# Examen Segundo Parcial - Pipeline de datos contenerizado
 
-- **Materia:** Manejo Masivo de Datos (Big Data)
-- **Alumno:** Alan Noé Vega Nieto
-- **Matrícula:** 125053132
-- **Pregunta asignada:** mi matrícula termina en 2, así que me tocó el **ticket promedio (ingreso promedio por registro) por tienda**.
+# Examen del segundo parcial: Pipeline de datos con Docker
 
-## Qué hace el proyecto
+**Materia:** Manejo Masivo de Datos  
+**Alumno:** Alan Noé Vega Nieto  
+**Matrícula:** 125053132  
+**Tema:** Ticket promedio por tienda 
 
-Es el pipeline de DataMart con 3 contenedores que se levantan con un solo comando:
+## ¿Qué hice en este proyecto?
 
-```
-data/ventas_125053132.csv
-        |
-        v
-   [ hadoop ]  MapReduce con Hadoop Streaming (mapper.py + reducer.py)
-        |
-        v  part-00000 (volumen "resultados")
-   [ api ]  scripts/cargar_resultados.py lo inserta en la base
-        |
-        v
-   [ db ]  PostgreSQL, tabla "resultados" (volumen "pgdata")
-        ^
-        |
-   [ api ]  Flask: GET / POST / PUT / DELETE  ->  http://localhost:5001
-```
+Primero genero un archivo CSV con las ventas. Después, Hadoop procesa esos datos con `mapper.py` y `reducer.py`. El resultado se guarda en PostgreSQL con un script de Python y, al final, puedo consultar o modificar los registros desde la API de Flask.
 
-- **hadoop**: Debian 12 + OpenJDK 17 + Python 3 + Hadoop 3.3.6 en modo standalone, con servidor SSH.
-- **db**: PostgreSQL 16 con volumen nombrado y las credenciales en `.env`.
-- **api**: el CRUD en Flask adaptado a la tabla `resultados`. Se conecta a la base por el nombre del servicio (`db`).
+El proyecto usa 3 contenedores:
 
-Los tres están en la red `red_datamart` que se define en el compose.
+- **hadoop:** tiene Debian 12, Java 17, Python 3 y Hadoop 3.3.6. Aquí se hace el cálculo con MapReduce en modo standalone.
+- **db:** usa PostgreSQL 16 para guardar los resultados en la tabla `resultados`.
+- **api:** tiene Flask, los endpoints del CRUD y el script que carga los resultados a la base de datos.
 
-## Pasos para reproducir
+Los contenedores se comunican por la red `red_datamart`. La base conserva su información en el volumen `pgdata`.
 
-Se necesita Docker Desktop abierto, Git y Python 3.
+## Cómo correr el proyecto
 
-**1. Clonar el repositorio**
+Se necesita tener Docker Desktop abierto, todos los comandos se ejecutan desde la terminal.
+
+### 1. Entrar a la carpeta del proyecto
+
+Primero se clona el repositorio:
 
 ```bash
-git clone URL_DE_TU_REPO
+git clone https://github.com/alan67-bsk/examen-p2-125053132.git
 cd examen-p2-125053132
 ```
 
-**2. Generar el dataset** (no viene en el repo porque pesa unos 340 MB). Se genera dentro de la carpeta `data/`, que es la que se monta en el contenedor:
+### 2. Generar el archivo de ventas
+
+El CSV no está incluido en el repositorio porque pesa aproximadamente 340 MB. Lo genero usando mi matrícula:
 
 ```bash
 cd data
@@ -50,194 +41,314 @@ python3 ../generar_dataset.py 125053132
 cd ..
 ```
 
-**3. Crear el archivo `.env`** a partir del ejemplo y cambiarle la contraseña:
+Esto deja el archivo `ventas_125053132.csv` en la carpeta `data/`, que después utiliza el contenedor de Hadoop.
+
+### 3. Preparar las variables de entorno
+
+Creo el archivo `.env` a partir del ejemplo:
 
 ```bash
 cp .env.example .env
 ```
 
-**4. Levantar todo**
+Después abro `.env` y cambio la contraseña de ejemplo por la que voy a utilizar.
+
+### 4. Levantar los contenedores
 
 ```bash
 docker compose up --build
 ```
 
-La primera vez tarda porque se descarga Hadoop (unos 700 MB). Cuando ya estén los tres servicios arriba, los siguientes comandos se corren en otra pestaña de la terminal, en la misma carpeta.
+La primera vez puede tardar más porque tiene que descargar e instalar las dependencias, incluyendo Hadoop.
 
-**5. Correr el job de MapReduce**
+Cuando los contenedores ya estén funcionando, dejo esa terminal abierta y uso otra para los siguientes comandos.
+
+### 5. Ejecutar MapReduce
 
 ```bash
 docker compose exec -u hadoop hadoop bash /app/mapreduce/ejecutar_job.sh
 ```
 
-Ese script borra la salida anterior y corre este comando midiendo el tiempo:
+Con esto se procesa el CSV y se calcula el ticket promedio de cada tienda.
+
+El script también elimina una salida anterior para que Hadoop pueda volver a generar el resultado y mide cuánto tarda.
+
+La parte principal que ejecuta Hadoop Streaming es esta:
 
 ```bash
 hadoop jar $HADOOP_HOME/share/hadoop/tools/lib/hadoop-streaming-*.jar \
-    -input /data/input/ventas_125053132.csv \
-    -output /data/output/resultado \
-    -mapper mapper.py -reducer reducer.py \
-    -file mapper.py -file reducer.py
+  -input /data/input/ventas_125053132.csv \
+  -output /data/output/resultado \
+  -mapper mapper.py -reducer reducer.py \
+  -file mapper.py -file reducer.py
 ```
 
-**6. Correr el script secuencial y comparar**
+Este último bloque no hace falta ejecutarlo aparte, porque ya está incluido en `ejecutar_job.sh`.
+
+### 6. Comparar los tiempos
 
 ```bash
 docker compose exec -u hadoop hadoop bash /app/mapreduce/comparar.sh
 ```
 
-**7. Cargar los resultados a la base de datos**
+Este comando ejecuta la versión secuencial de Python para compararla con Hadoop. También comprueba que los resultados coincidan.
+
+### 7. Guardar los resultados en PostgreSQL
 
 ```bash
 docker compose exec api python scripts/cargar_resultados.py
 ```
 
-**8. Consultar la API**
+El script toma la salida de MapReduce (`part-00000`) y la guarda en la tabla `resultados` de la base de datos.
+
+### 8. Probar la API
+
+Para consultar todos los resultados o buscar una tienda en particular:
 
 ```bash
 curl http://localhost:5001/resultados
 curl http://localhost:5001/resultados/T001
 ```
 
-## Evidencias
+## Evidencias del examen
 
 ### Parte A. Infraestructura
 
-Los tres servicios levantados con `docker compose up --build`:
+Aquí se ve que los tres contenedores están levantados:
 
-![docker compose ps](evidencias/01_compose_ps.png)
+```bash
+docker compose ps
+```
 
-`hadoop version` dentro del contenedor:
+![Contenedores activos](evidencias/01_compose_ps.png)
+
+También comprobé la versión de Hadoop con:
 
 ```bash
 docker compose exec hadoop hadoop version
 ```
 
-![hadoop version](evidencias/02_hadoop_version.png)
+![Version de Hadoop](evidencias/02_hadoop_version.png)
 
-### Parte B. SSH sin contraseña
+### Parte B. Conexión SSH sin contraseña
 
-El usuario `hadoop` no tiene contraseña y el servidor SSH tiene desactivado el acceso con contraseña, solo se entra con llaves. Las llaves no están en el repo ni en el Dockerfile: se generan con `ssh-keygen` cuando arranca cada contenedor.
+Configuré el acceso por llaves SSH, sin usar contraseñas. Las llaves se crean al iniciar los contenedores, así que no tuve que guardarlas en el repositorio.
 
-- **`ssh localhost`**: el contenedor hadoop genera su par de llaves y agrega la pública a su `authorized_keys` (como lo pide Hadoop para el modo pseudo-distribuido).
-- **De api a hadoop**: el contenedor api genera su propio par. La llave privada se queda en api y solo la pública se copia a un volumen compartido (`llaves_ssh`), que el sshd de hadoop lee como otro archivo de llaves autorizadas.
+Primero probé la conexión dentro del propio contenedor de Hadoop:
 
 ```bash
 docker compose exec -u hadoop hadoop ssh localhost
 ```
 
-![ssh localhost](evidencias/03_ssh_localhost.png)
+![SSH en localhost](evidencias/03_ssh_localhost.png)
+
+Después probé la conexión desde el contenedor de la API hacia Hadoop:
 
 ```bash
 docker compose exec api ssh hadoop@hadoop
 ```
 
-![ssh de api a hadoop](evidencias/04_ssh_api_hadoop.png)
+![SSH de API a Hadoop](evidencias/04_ssh_api_hadoop.png)
 
-### Parte C. MapReduce
+En esta segunda conexión, la llave privada se queda en `api` y la pública se comparte por el volumen `llaves_ssh`, para que Hadoop permita el acceso.
 
-El mapper saca `tienda <TAB> ingreso` por cada venta (ingreso = cantidad x precio_unitario). Se salta el encabezado y las líneas mal formadas (las cuenta en un contador de Hadoop en lugar de tronar). El reducer recibe todo ordenado por tienda, suma los ingresos, cuenta las ventas y saca el promedio.
+### Parte C. MapReduce y comparación
 
-Salida del job:
+El `mapper.py` lee cada venta, toma la tienda y calcula el ingreso multiplicando la cantidad por el precio unitario. También omite el encabezado y los registros que no tienen el formato esperado.
 
-![job de mapreduce](evidencias/05_job_mapreduce.png)
+Después, `reducer.py` junta las ventas de cada tienda, suma sus ingresos y los divide entre la cantidad de registros. Así se obtiene el ticket promedio de cada una.
 
-### Comparativa de rendimiento (C2)
+![Ejecucion de MapReduce](evidencias/05_job_mapreduce.png)
 
-![comparativa](evidencias/06_comparativa_tiempos.png)
+Para saber si realmente convenía usar Hadoop, comparé su tiempo con el de un script normal de Python.
 
-| Método | Tiempo (real) |
+![Comparacion de tiempos](evidencias/06_comparativa_tiempos.png)
+
+### Resultados de la comparación
+
+| Método | Tiempo real |
 | --- | --- |
-| Hadoop MapReduce (Streaming, standalone) | TIEMPO_MAPREDUCE |
-| Script secuencial en Python (línea a línea) | TIEMPO_SECUENCIAL |
+| Hadoop MapReduce (standalone) | 13.522 segundos |
+| Python secuencial | 4.976 segundos |
 
-Los dos dan exactamente el mismo resultado, lo comparo con `diff` en `comparar.sh`.
+En mi prueba, Python secuencial fue más rápido, ya que terminó 8.546 segundos antes que Hadoop.
 
-En mi caso el script secuencial fue mucho más rápido. Hadoop en modo standalone corre todo en una sola JVM y en una sola máquina, entonces no hay paralelismo real y solo queda el costo extra: arrancar la JVM, partir el CSV en splits, pasar cada línea por una tubería a un proceso de Python (así trabaja Streaming), escribir a disco los 5 millones de pares clave-valor, ordenarlos y luego pasarlos al reducer. El secuencial solo lee el archivo una vez y va sumando en un diccionario que tiene una llave por tienda, eso cabe sin problema en memoria. Con un archivo de este tamaño ese trabajo extra de MapReduce pesa más que lo que ayuda. Empezaría a convenir con datos que ya no caben en una sola máquina y con un clúster de varios nodos donde los maps sí corren en paralelo.
+Esto pasa porque Hadoop necesita preparar el trabajo y ordenar los datos antes de terminar el cálculo. Como aquí lo usé en modo standalone, todo se ejecutó en una sola máquina.
 
-### Parte D. Integración
+En cambio, el script de Python solo leyó el CSV y fue sumando los datos de cada tienda, sin esos pasos extra.
 
-Carga de `part-00000` a la tabla `resultados`:
+Lo que pude observar es que Hadoop no siempre será más rápido, porque depende de la cantidad de datos y de cómo esté configurado.
 
-![carga a la base](evidencias/07_carga_bd.png)
+En este caso, el script secuencial fue aproximadamente 2.7 veces más rápido.
 
-Endpoints de lectura:
+También comprobé que los dos métodos entregan el mismo resultado. El script `comparar.sh` lo revisa usando `diff`.
+
+### Parte D. Base de datos y API
+
+Primero cargué los resultados de Hadoop a PostgreSQL:
+
+![Resultados cargados en PostgreSQL](evidencias/07_carga_bd.png)
+
+Luego probé las consultas GET:
 
 ```bash
 curl http://localhost:5001/resultados
 curl http://localhost:5001/resultados/T001
 ```
 
-![api get](evidencias/08_api_get.png)
+![Consultas GET](evidencias/08_api_get.png)
 
-Endpoints de escritura (el CRUD completo sobre la tabla nueva):
+También probé que se pudiera agregar, modificar y eliminar un registro.
+
+**Agregar una tienda (POST):**
 
 ```bash
 curl -X POST http://localhost:5001/resultados \
-     -H "Content-Type: application/json" \
-     -d '{"tienda": "T099", "ticket_promedio": 1234.50, "num_ventas": 10}'
+  -H "Content-Type: application/json" \
+  -d '{"tienda": "T099", "ticket_promedio": 1234.50, "num_ventas": 10}'
+```
 
+**Modificar el ticket promedio (PUT):**
+
+```bash
 curl -X PUT http://localhost:5001/resultados/T099 \
-     -H "Content-Type: application/json" \
-     -d '{"ticket_promedio": 2000}'
+  -H "Content-Type: application/json" \
+  -d '{"ticket_promedio": 2000}'
+```
 
+**Eliminar esa tienda (DELETE):**
+
+```bash
 curl -X DELETE http://localhost:5001/resultados/T099
 ```
 
-![api escritura](evidencias/09_api_escritura.png)
+![Pruebas POST PUT y DELETE](evidencias/09_api_escritura.png)
 
-Persistencia: después de `docker compose down` y `docker compose up -d` los datos siguen en la base porque están en el volumen nombrado `pgdata`.
+Por último, revisé la persistencia de los datos.
 
-![persistencia](evidencias/10_persistencia.png)
+Al apagar los contenedores con:
 
-## Parte E. Teoría
-
-**1. Modos de Hadoop.**
-En *standalone* todo corre en un solo proceso de Java en la máquina local, no se levanta ningún demonio y se usa el sistema de archivos normal del sistema operativo. Sirve para probar y depurar, es el que uso en este examen. En *pseudo-distribuido* sigue siendo una sola máquina, pero cada demonio (NameNode, DataNode, ResourceManager, NodeManager) corre en su propio proceso y se comunican como si fueran un clúster, por eso pide SSH a localhost. En *totalmente distribuido* los demonios están repartidos en varias máquinas y ya hay replicación y tolerancia a fallos de verdad. HDFS se usa en el pseudo-distribuido y en el totalmente distribuido, en standalone no.
-
-**2. Por qué el dataset va como volumen y no con `COPY`.**
-Primero, porque la imagen pesaría 340 MB más y cada vez que cambiara el CSV habría que reconstruirla. Segundo, porque los datos no son parte de la aplicación: con volumen la misma imagen sirve para el dataset de cualquier matrícula. Además así el CSV no queda guardado dentro de la imagen (si se publica la imagen se irían los datos con ella) y montarlo en solo lectura protege el archivo original.
-
-**3. `docker compose down` contra `down -v`.**
-Con `docker compose down` se detienen y se borran los contenedores y la red, pero los volúmenes nombrados se quedan. Como los datos de PostgreSQL están en el volumen `pgdata`, al volver a levantar siguen ahí. Con `docker compose down -v` también se borran los volúmenes, entonces la base se pierde: al levantar otra vez PostgreSQL arranca vacío y hay que volver a cargar los resultados.
-
-**4. Por qué MapReduce no siempre es más rápido.**
-Porque tiene un costo fijo: arrancar la JVM, dividir el archivo, lanzar las tareas, escribir resultados intermedios a disco y ordenarlos en el shuffle. Con 400 MB, que caben en la memoria de una laptop, ese costo es más grande que el trabajo en sí, y en standalone ni siquiera hay varias máquinas para repartirlo. Conviene cuando los datos ya no caben en una sola máquina (cientos de GB o TB), cuando hay un clúster con varios nodos para paralelizar y cuando se necesita tolerancia a fallos.
-
-**5. `CMD` vs `ENTRYPOINT` y `COPY` vs `ADD`.**
-`CMD` es el comando por defecto del contenedor y se reemplaza fácil escribiendo otro al final de `docker run`. `ENTRYPOINT` es el ejecutable fijo: lo que se escriba al final de `docker run` (o lo que diga `CMD`) le llega como argumentos. En mi Dockerfile de hadoop el `ENTRYPOINT` es el script que prepara las llaves y el `CMD` es el servidor SSH. `COPY` solo copia archivos del contexto de build a la imagen. `ADD` hace lo mismo pero además puede descargar desde una URL y descomprime solo los `.tar` locales. Se recomienda usar `COPY` a menos que se necesite eso extra.
-
-## Estructura del repositorio
-
+```bash
+docker compose down
 ```
+
+Y volverlos a levantar con:
+
+```bash
+docker compose up -d
+```
+
+Los registros siguen guardados porque PostgreSQL utiliza el volumen `pgdata`.
+
+![Prueba de persistencia](evidencias/10_persistencia.png)
+
+## Parte E. Preguntas de teoría
+
+### 1. ¿Cuáles son los modos de Hadoop?
+
+**Standalone:** todo se ejecuta en una sola máquina y usa sus archivos locales. Es el modo que utilicé para procesar los datos de este examen.
+
+**Pseudo-distribuido:** también usa una sola máquina, pero separa los servicios de Hadoop en distintos procesos, como si fuera un clúster pequeño. Puede utilizar HDFS y necesita la comunicación entre esos servicios.
+
+**Totalmente distribuido:** trabaja con varias máquinas conectadas. Así puede repartir las tareas y almacenar los datos de forma distribuida.
+
+### 2. ¿Por qué monté el CSV como volumen y no usé COPY?
+
+Porque el CSV es bastante pesado y no necesitaba meterlo directamente en la imagen de Docker.
+
+Al montarlo como volumen puedo cambiar el archivo sin reconstruir la imagen. Además, los datos quedan separados del código y se puede usar el mismo proyecto con otro dataset.
+
+### 3. ¿Qué diferencia hay entre docker compose down y docker compose down -v?
+
+Con `docker compose down` se eliminan los contenedores y la red, pero se conservan los volúmenes nombrados.
+
+Por eso los resultados de PostgreSQL siguen ahí cuando vuelvo a levantar el proyecto.
+
+En cambio, con `docker compose down -v` también se eliminan los volúmenes.
+
+Si hago eso, pierdo los datos guardados en `pgdata` y tendría que cargarlos otra vez.
+
+### 4. ¿Por qué MapReduce no siempre es más rápido?
+
+Porque necesita preparar las tareas, organizar los datos y juntar los resultados. Todo eso también consume tiempo.
+
+En este examen, como estoy usando Hadoop en una sola máquina, ese trabajo extra hizo que tardara más que Python secuencial.
+
+MapReduce tiene más sentido cuando hay una cantidad mucho mayor de datos y varias máquinas que puedan repartirse el trabajo.
+
+### 5. ¿Cuál es la diferencia entre CMD, ENTRYPOINT, COPY y ADD?
+
+**CMD y ENTRYPOINT:**
+
+Los dos sirven para indicar qué se ejecuta al iniciar un contenedor.
+
+`CMD` establece un comando o unos argumentos por defecto que se pueden reemplazar al ejecutar el contenedor.
+
+`ENTRYPOINT` define el programa principal que se va a ejecutar.
+
+En el Dockerfile de Hadoop usé `ENTRYPOINT` para preparar las llaves y `CMD` para iniciar SSH.
+
+**COPY y ADD:**
+
+Ambos permiten agregar archivos a una imagen.
+
+`COPY` se usa para copiarlos directamente.
+
+`ADD` tiene opciones extra, como extraer archivos `.tar` locales o descargar archivos desde una URL.
+
+Para copiar archivos normales es suficiente con `COPY`.
+
+## Archivos del proyecto
+
+```text
 examen-p2-125053132/
 ├── README.md
-├── .gitignore               # incluye *.csv y .env
+├── .gitignore
 ├── .env.example
 ├── docker-compose.yml
-├── generar_dataset.py       # script del examen para generar el CSV
-├── data/                    # aquí va el CSV (no se sube)
+├── generar_dataset.py
+├── data/
 ├── hadoop/
 │   ├── Dockerfile
-│   └── entrypoint.sh        # genera las llaves SSH al arrancar
+│   └── entrypoint.sh
 ├── mapreduce/
 │   ├── mapper.py
 │   ├── reducer.py
 │   ├── secuencial.py
-│   ├── ejecutar_job.sh      # corre el job con Hadoop Streaming y mide el tiempo
-│   └── comparar.sh          # corre el secuencial y compara resultados
+│   ├── ejecutar_job.sh
+│   └── comparar.sh
 ├── api/
 │   ├── Dockerfile
-│   ├── entrypoint.sh        # genera la llave de la api y comparte la pública
+│   ├── entrypoint.sh
 │   ├── requirements.txt
 │   └── app.py
 ├── scripts/
 │   └── cargar_resultados.py
-└── evidencias/              # capturas
+└── evidencias/
 ```
 
-## Errores comunes
+La carpeta `data/` es donde genero el CSV, pero ese archivo no se sube al repositorio.
 
-- `env file .env not found`: falta el paso 3 (`cp .env.example .env`).
-- `No encuentro /data/input/ventas_125053132.csv`: el CSV no está en la carpeta `data/`.
-- El puerto 5001 está ocupado: cambiar `API_PORT` en `.env` y volver a correr `docker compose up -d`.
+En `evidencias/` guardé las capturas de las pruebas.
+
+## Si aparece algún error
+
+**Error: `env file .env not found`**
+
+Significa que me faltó crear el archivo `.env`. Lo puedo solucionar con:
+
+```bash
+cp .env.example .env
+```
+
+**Error: `No encuentro /data/input/ventas_125053132.csv`**
+
+Significa que el archivo de ventas no se generó o no quedó dentro de la carpeta `data/`.
+
+**El puerto 5001 está ocupado**
+
+Puedo cambiar `API_PORT` en `.env` y volver a levantar los contenedores con:
+
+```bash
+docker compose up -d
+```
