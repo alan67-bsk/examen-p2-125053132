@@ -1,0 +1,66 @@
+# Pipeline DataMart: hadoop (procesa) -> db (guarda) -> api (expone)
+# Se levanta todo con: docker compose up --build
+
+name: datamart
+
+services:
+
+  # Hadoop standalone + servidor SSH. Aqui se corre el job de MapReduce.
+  hadoop:
+    build: ./hadoop
+    hostname: hadoop
+    volumes:
+      # el dataset entra como volumen de solo lectura, no va dentro de la imagen
+      - ./data:/data/input:ro
+      # mapper, reducer y secuencial (si los edito no hay que reconstruir la imagen)
+      - ./mapreduce:/app/mapreduce:ro
+      # salida del job, compartida con la api para poder cargarla a la base
+      - resultados:/data/output
+      # llave publica que deja la api para poder entrar por SSH
+      - llaves_ssh:/llaves:ro
+    networks:
+      - red_datamart
+
+  # PostgreSQL con volumen nombrado para que los datos no se pierdan
+  db:
+    image: postgres:16-alpine
+    env_file:
+      - .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - red_datamart
+
+  # API en Flask (CRUD sobre la tabla resultados)
+  api:
+    build: ./api
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # puerto de mi maquina : puerto de Flask dentro del contenedor
+      - "${API_PORT:-5001}:5000"
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - resultados:/data/output:ro
+      - llaves_ssh:/llaves
+    networks:
+      - red_datamart
+
+# Red propia del proyecto: dentro de ella los contenedores se encuentran
+# por el nombre del servicio (hadoop, db, api)
+networks:
+  red_datamart:
+    driver: bridge
+
+volumes:
+  pgdata:       # datos de PostgreSQL
+  resultados:   # salida del job de Hadoop
+  llaves_ssh:   # llave publica de la api

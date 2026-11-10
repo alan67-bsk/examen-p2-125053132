@@ -1,0 +1,15 @@
+# El dataset pesa ~340 MB y no se sube al repo
+*.csv
+data/*
+!data/.gitkeep
+
+# Credenciales reales
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
